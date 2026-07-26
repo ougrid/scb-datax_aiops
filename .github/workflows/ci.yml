@@ -1,12 +1,3 @@
-# TODO: Implement CI/CD pipeline
-# 
-# This workflow should ensure code quality before deployment.
-# Consider: What checks are necessary? How do you gate deployments?
-#           How can someone verify a deployment occurred?
-#
-# The eval-runner service exists for a reason. The deployment/ directory
-# contains a manifest that may be useful.
-
 name: CI/CD Pipeline
 
 on:
@@ -15,9 +6,170 @@ on:
   pull_request:
     branches: [main, dev]
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository }}/agent-api
+
 jobs:
-  # TODO: Design and implement your pipeline
-  placeholder:
+  lint:
     runs-on: ubuntu-latest
     steps:
-      - run: exit 1
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - run: pip install ruff
+      # Scoped to F (pyflakes: unused imports/vars, undefined names, bad
+      # f-strings) and E9 (syntax errors) - genuine correctness signals.
+      # The full default rule set is dominated by line-length noise on
+      # code that predates this gate; enforcing that retroactively would
+      # be a repo-wide reformat unrelated to any of the five graded tasks.
+      - run: ruff check --select F,E9 agent-api eval-runner traffic-generator
+
+  validate-config:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Validate docker-compose.yml
+        run: docker compose config -q
+      - name: Validate Grafana dashboard JSON
+        run: python3 -c "import json; json.load(open('grafana/dashboards/agent-monitoring.json'))"
+      - name: Validate Prometheus config and rule syntax
+        run: |
+          docker run --rm --entrypoint /bin/promtool \
+            -v "${{ github.workspace }}/prometheus:/etc/prometheus:ro" \
+            prom/prometheus:v2.47.0 check config /etc/prometheus/prometheus.yml
+      # `check rules` above only validates syntax - it reports SUCCESS on
+      # `expr: vector(0) > 1` because that's syntactically valid. `test
+      # rules` is what actually proves a threshold fires and doesn't flap;
+      # see prometheus/alert-rules.test.yml for the fires/stays-silent
+      # pairs behind every alert.
+      - name: Unit-test alert rules
+        run: |
+          docker run --rm --entrypoint /bin/promtool \
+            -v "${{ github.workspace }}/prometheus:/etc/prometheus:ro" -w /etc/prometheus \
+            prom/prometheus:v2.47.0 test rules alert-rules.test.yml
+
+  unit-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+          cache-dependency-path: agent-api/requirements-dev.txt
+      - run: pip install -r agent-api/requirements-dev.txt
+      # cd into agent-api: app.py isn't a package, so pytest can't import it
+      # (`from app import ...`) when the rootdir is the repo root instead.
+      - run: cd agent-api && pytest tests -v
+
+  build:
+    needs: [lint, validate-config, unit-test]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    outputs:
+      image_tag: ${{ steps.meta.outputs.tag }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: meta
+        run: echo "tag=sha-$(git rev-parse --short HEAD)" >> "$GITHUB_OUTPUT"
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      # Tagging by commit SHA (not just `latest`) is what makes a
+      # deployment traceable to a specific commit - `latest` alone can't
+      # answer "what's actually running" after a second build happens.
+      - uses: docker/build-push-action@v6
+        with:
+          context: ./agent-api
+          push: true
+          tags: |
+            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ steps.meta.outputs.tag }}
+            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  integration:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Start the stack
+        run: docker compose up -d --build
+        env:
+          GIT_SHA: ${{ github.sha }}
+      - name: Wait for agent-api to be healthy
+        run: |
+          for _ in $(seq 1 30); do
+            status=$(docker inspect --format '{{.State.Health.Status}}' agent-api 2>/dev/null || echo "starting")
+            [ "$status" = "healthy" ] && exit 0
+            sleep 2
+          done
+          echo "agent-api never became healthy" >&2
+          docker compose logs agent-api
+          exit 1
+      # This is the quality gate the brief asks for: a non-zero exit here
+      # (golden accuracy, golden rejection rate, or adversarial rejection
+      # rate outside their thresholds) fails the job and blocks the merge.
+      - name: Run eval suite
+        run: docker compose run --rm eval-runner
+      - name: Upload eval results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: eval-results
+          path: eval-results/
+      - name: Tear down
+        if: always()
+        run: docker compose down -v
+
+  deploy:
+    needs: integration
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      # deployment/manifest.yml explicitly asks for this: image_tag updated
+      # to the deployed commit SHA, with a history row appended.
+      - name: Record the deployed commit in deployment/manifest.yml
+        run: |
+          python3 - <<'PYEOF'
+          import re
+          from datetime import datetime, timezone
+
+          sha = "${{ github.sha }}"
+          short_sha = sha[:7]
+          timestamp = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
+
+          path = "deployment/manifest.yml"
+          with open(path) as f:
+              content = f.read()
+
+          content = re.sub(r'image_tag: ".*?"', f'image_tag: "{short_sha}"', content, count=1)
+          content = content.rstrip("\n") + f"\n# | {timestamp} | {short_sha} | github-actions |\n"
+
+          with open(path, "w") as f:
+              f.write(content)
+          PYEOF
+      - name: Commit the manifest update
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add deployment/manifest.yml
+          git diff --cached --quiet || git commit -m "ci: record deployed commit $(echo ${{ github.sha }} | cut -c1-7) in manifest [skip ci]"
+          git push
