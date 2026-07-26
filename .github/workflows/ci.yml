@@ -67,9 +67,14 @@ jobs:
           cache: "pip"
           cache-dependency-path: agent-api/requirements-dev.txt
       - run: pip install -r agent-api/requirements-dev.txt
-      # cd into agent-api: app.py isn't a package, so pytest can't import it
-      # (`from app import ...`) when the rootdir is the repo root instead.
-      - run: cd agent-api && pytest tests -v
+      # `python -m pytest`, not the bare `pytest` script: `-m` prepends the
+      # cwd to sys.path, which is what makes `from app import ...` resolve.
+      # The bare console-script entry point doesn't do that - it only adds
+      # the test file's own directory (agent-api/tests/), not its parent -
+      # so `cd agent-api && pytest tests -v` alone still fails with
+      # `ModuleNotFoundError: No module named 'app'` despite rootdir being
+      # correct. Confirmed by reproducing the exact CI failure locally.
+      - run: cd agent-api && python -m pytest tests -v
 
   build:
     needs: [lint, validate-config, unit-test]
