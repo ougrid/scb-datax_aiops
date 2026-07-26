@@ -54,6 +54,18 @@ services:
     networks:
       - aiops-network
 
+  # Alertmanager
+  alertmanager:
+    image: prom/alertmanager:v0.27.0
+    container_name: alertmanager
+    ports:
+      - "9093:9093"
+    volumes:
+      - ./alertmanager/alertmanager.yml:/etc/alertmanager/alertmanager.yml:ro
+      - alertmanager-data:/alertmanager
+    networks:
+      - aiops-network
+
   # Grafana
   grafana:
     image: grafana/grafana:10.1.0
@@ -101,3 +113,4 @@ networks:
 volumes:
   prometheus-data:
   grafana-data:
+  alertmanager-data:

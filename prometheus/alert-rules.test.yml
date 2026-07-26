@@ -1,0 +1,291 @@
+# Rule unit tests: `promtool test rules alert-rules.test.yml`
+#
+# Every threshold gets a pair - fires under the incident condition, stays silent
+# at the healthy baseline (~15% rejection rate, ~2 req/s, ~90us mean latency,
+# measured from the running stack). `promtool check rules` alone is not a real
+# gate here: it validates syntax, so `expr: vector(0) > 1` passes it cleanly.
+# These tests are what actually prove a threshold fires and doesn't flap.
+
+rule_files:
+  - alert-rules.yml
+
+evaluation_interval: 1m
+
+tests:
+  # --- AgentAPIDown -----------------------------------------------------------
+
+  - interval: 1m
+    input_series:
+      - series: 'up{job="agent-api", instance="agent-api:8080"}'
+        values: "0x10"
+    alert_rule_test:
+      - eval_time: 5m
+        alertname: AgentAPIDown
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+              job: agent-api
+              instance: agent-api:8080
+            exp_annotations:
+              summary: "Agent API is down"
+              description: "The agent API has been unreachable for more than 1 minute."
+
+  - interval: 1m
+    input_series:
+      - series: 'up{job="agent-api", instance="agent-api:8080"}'
+        values: "1x10"
+    alert_rule_test:
+      - eval_time: 5m
+        alertname: AgentAPIDown
+        exp_alerts: []
+
+  # --- AgentAPITargetMissing ---------------------------------------------------
+
+  - interval: 1m
+    input_series: []
+    alert_rule_test:
+      - eval_time: 10m
+        alertname: AgentAPITargetMissing
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+              job: agent-api
+            exp_annotations:
+              summary: "Prometheus has no agent-api scrape target"
+              description: "The agent-api target has disappeared from service discovery for 5m. This is not the same failure as AgentAPIDown - check `docker compose ps` and the Prometheus targets page (/targets), not just the app logs."
+
+  - interval: 1m
+    input_series:
+      - series: 'up{job="agent-api", instance="agent-api:8080"}'
+        values: "1x15"
+    alert_rule_test:
+      - eval_time: 10m
+        alertname: AgentAPITargetMissing
+        exp_alerts: []
+
+  # --- HighRejectionRate: fires sustained at 40%, stays silent at 15% ---------
+
+  - interval: 1m
+    input_series:
+      - series: 'agent_rejections_total{prompt_version="v1.0.0", reason="prompt_injection"}'
+        values: "0+40x25"
+      - series: 'agent_requests_total{prompt_version="v1.0.0", route="/ask", status="rejected"}'
+        values: "0+40x25"
+      - series: 'agent_requests_total{prompt_version="v1.0.0", route="/ask", status="accepted"}'
+        values: "0+60x25"
+    alert_rule_test:
+      - eval_time: 20m
+        alertname: HighRejectionRate
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+            exp_annotations:
+              summary: "Rejection rate is 40%, above the 30% threshold"
+              description: "Sustained for 10m+. Check which category is driving it: sum by (reason) (rate(agent_rejections_total[5m])). If one reason dominates, that's the likely cause (bad prompt-version rollout for under-rejection's opposite case, an attack, or a client bug retrying rejected requests)."
+              runbook_url: "docs/incident-response.md"
+
+  - interval: 1m
+    input_series:
+      - series: 'agent_rejections_total{prompt_version="v1.0.0", reason="prompt_injection"}'
+        values: "0+15x25"
+      - series: 'agent_requests_total{prompt_version="v1.0.0", route="/ask", status="rejected"}'
+        values: "0+15x25"
+      - series: 'agent_requests_total{prompt_version="v1.0.0", route="/ask", status="accepted"}'
+        values: "0+85x25"
+    alert_rule_test:
+      - eval_time: 20m
+        alertname: HighRejectionRate
+        exp_alerts: []
+
+  # --- RejectionRateSpike: 60% now vs ~27% trailing-hour baseline fires; ------
+  # --- a flat, unchanging 15% (nothing to compare against) stays silent -------
+
+  - interval: 1m
+    input_series:
+      - series: 'agent_rejections_total{prompt_version="v1.0.0", reason="prompt_injection"}'
+        values: "0+10x55 550+60x25"
+      - series: 'agent_requests_total{prompt_version="v1.0.0", route="/ask", status="rejected"}'
+        values: "0+10x55 550+60x25"
+      - series: 'agent_requests_total{prompt_version="v1.0.0", route="/ask", status="accepted"}'
+        values: "0+90x55 4950+40x25"
+    alert_rule_test:
+      - eval_time: 75m
+        alertname: RejectionRateSpike
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+            exp_annotations:
+              summary: "Rejection rate has more than doubled versus the trailing hour"
+              description: "Current 5m rate is 60% of requests. Compare against agent_build_info to check for a recent deploy, and by-reason breakdown to identify the attack class."
+              runbook_url: "docs/incident-response.md"
+
+  - interval: 1m
+    input_series:
+      - series: 'agent_rejections_total{prompt_version="v1.0.0", reason="prompt_injection"}'
+        values: "0+15x25"
+      - series: 'agent_requests_total{prompt_version="v1.0.0", route="/ask", status="rejected"}'
+        values: "0+15x25"
+      - series: 'agent_requests_total{prompt_version="v1.0.0", route="/ask", status="accepted"}'
+        values: "0+85x25"
+    alert_rule_test:
+      - eval_time: 20m
+        alertname: RejectionRateSpike
+        exp_alerts: []
+
+  # --- LowRejectionRate: fires sustained at 2%, stays silent at 15% -----------
+
+  - interval: 1m
+    input_series:
+      - series: 'agent_rejections_total{prompt_version="v1.0.0", reason="prompt_injection"}'
+        values: "0+2x40"
+      - series: 'agent_requests_total{prompt_version="v1.0.0", route="/ask", status="rejected"}'
+        values: "0+2x40"
+      - series: 'agent_requests_total{prompt_version="v1.0.0", route="/ask", status="accepted"}'
+        values: "0+98x40"
+    alert_rule_test:
+      - eval_time: 35m
+        alertname: LowRejectionRate
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+            exp_annotations:
+              summary: "Rejection rate has dropped to 2% - safety filter may be failing"
+              description: "Treat as a security incident, not a metrics quirk: reproduce with `make test-reject` and re-run the eval suite (docker compose run --rm eval-runner) to confirm the classifier is still rejecting the adversarial dataset."
+              runbook_url: "docs/incident-response.md"
+
+  - interval: 1m
+    input_series:
+      - series: 'agent_rejections_total{prompt_version="v1.0.0", reason="prompt_injection"}'
+        values: "0+15x40"
+      - series: 'agent_requests_total{prompt_version="v1.0.0", route="/ask", status="rejected"}'
+        values: "0+15x40"
+      - series: 'agent_requests_total{prompt_version="v1.0.0", route="/ask", status="accepted"}'
+        values: "0+85x40"
+    alert_rule_test:
+      - eval_time: 35m
+        alertname: LowRejectionRate
+        exp_alerts: []
+
+  # --- NoTraffic: fires when the counter never moves, stays silent with -------
+  # --- ongoing traffic ---------------------------------------------------------
+
+  - interval: 1m
+    input_series:
+      - series: 'agent_requests_total{prompt_version="v1.0.0", route="/ask", status="accepted"}'
+        values: "100+0x20"
+    alert_rule_test:
+      - eval_time: 15m
+        alertname: NoTraffic
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+            exp_annotations:
+              summary: "No /ask requests in the last 5 minutes"
+              description: "Check `docker compose ps traffic-generator` and its logs. up{job=\"agent-api\"} being 1 here means the API itself is healthy - this is a traffic-source problem, not an API outage."
+
+  - interval: 1m
+    input_series:
+      - series: 'agent_requests_total{prompt_version="v1.0.0", route="/ask", status="accepted"}'
+        values: "0+50x20"
+    alert_rule_test:
+      - eval_time: 15m
+        alertname: NoTraffic
+        exp_alerts: []
+
+  # --- HighErrorRate: fires at 2% errors; stays silent when the error label ---
+  # --- has never been incremented (exercises the `or vector(0)` guard) --------
+
+  - interval: 1m
+    input_series:
+      - series: 'agent_requests_total{prompt_version="v1.0.0", route="/ask", status="error"}'
+        values: "0+10x20"
+      - series: 'agent_requests_total{prompt_version="v1.0.0", route="/ask", status="accepted"}'
+        values: "0+490x20"
+    alert_rule_test:
+      - eval_time: 15m
+        alertname: HighErrorRate
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+            exp_annotations:
+              summary: "Error rate is 2%, above 1%"
+              description: "Check `docker compose logs agent-api` for tracebacks. Unlike rejections (200s), this is 500s - an unhandled exception, not policy behavior."
+
+  - interval: 1m
+    input_series:
+      - series: 'agent_requests_total{prompt_version="v1.0.0", route="/ask", status="accepted"}'
+        values: "0+100x20"
+    alert_rule_test:
+      - eval_time: 15m
+        alertname: HighErrorRate
+        exp_alerts: []
+
+  # --- HighLatencyP95: fires when every observation lands in the (0.1s,0.5s] --
+  # --- bucket; stays silent when everything lands in the fastest bucket -------
+
+  - interval: 1m
+    input_series:
+      - series: 'agent_request_latency_seconds_bucket{prompt_version="v1.0.0", route="/ask", le="0.0001"}'
+        values: "0+0x30"
+      - series: 'agent_request_latency_seconds_bucket{prompt_version="v1.0.0", route="/ask", le="0.00025"}'
+        values: "0+0x30"
+      - series: 'agent_request_latency_seconds_bucket{prompt_version="v1.0.0", route="/ask", le="0.0005"}'
+        values: "0+0x30"
+      - series: 'agent_request_latency_seconds_bucket{prompt_version="v1.0.0", route="/ask", le="0.001"}'
+        values: "0+0x30"
+      - series: 'agent_request_latency_seconds_bucket{prompt_version="v1.0.0", route="/ask", le="0.0025"}'
+        values: "0+0x30"
+      - series: 'agent_request_latency_seconds_bucket{prompt_version="v1.0.0", route="/ask", le="0.005"}'
+        values: "0+0x30"
+      - series: 'agent_request_latency_seconds_bucket{prompt_version="v1.0.0", route="/ask", le="0.01"}'
+        values: "0+0x30"
+      - series: 'agent_request_latency_seconds_bucket{prompt_version="v1.0.0", route="/ask", le="0.025"}'
+        values: "0+0x30"
+      - series: 'agent_request_latency_seconds_bucket{prompt_version="v1.0.0", route="/ask", le="0.1"}'
+        values: "0+0x30"
+      - series: 'agent_request_latency_seconds_bucket{prompt_version="v1.0.0", route="/ask", le="0.5"}'
+        values: "0+10x30"
+      - series: 'agent_request_latency_seconds_bucket{prompt_version="v1.0.0", route="/ask", le="1.0"}'
+        values: "0+10x30"
+      - series: 'agent_request_latency_seconds_bucket{prompt_version="v1.0.0", route="/ask", le="+Inf"}'
+        values: "0+10x30"
+    alert_rule_test:
+      - eval_time: 25m
+        alertname: HighLatencyP95
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+            exp_annotations:
+              summary: "p95 latency is 480ms, above 50ms"
+              description: "50ms is ~500x the measured baseline p95 (sub-millisecond), so this indicates a real regression - check for resource exhaustion (docker stats) or a change in request handling, not normal jitter."
+
+  - interval: 1m
+    input_series:
+      - series: 'agent_request_latency_seconds_bucket{prompt_version="v1.0.0", route="/ask", le="0.0001"}'
+        values: "0+100x30"
+      - series: 'agent_request_latency_seconds_bucket{prompt_version="v1.0.0", route="/ask", le="0.00025"}'
+        values: "0+100x30"
+      - series: 'agent_request_latency_seconds_bucket{prompt_version="v1.0.0", route="/ask", le="0.0005"}'
+        values: "0+100x30"
+      - series: 'agent_request_latency_seconds_bucket{prompt_version="v1.0.0", route="/ask", le="0.001"}'
+        values: "0+100x30"
+      - series: 'agent_request_latency_seconds_bucket{prompt_version="v1.0.0", route="/ask", le="0.0025"}'
+        values: "0+100x30"
+      - series: 'agent_request_latency_seconds_bucket{prompt_version="v1.0.0", route="/ask", le="0.005"}'
+        values: "0+100x30"
+      - series: 'agent_request_latency_seconds_bucket{prompt_version="v1.0.0", route="/ask", le="0.01"}'
+        values: "0+100x30"
+      - series: 'agent_request_latency_seconds_bucket{prompt_version="v1.0.0", route="/ask", le="0.025"}'
+        values: "0+100x30"
+      - series: 'agent_request_latency_seconds_bucket{prompt_version="v1.0.0", route="/ask", le="0.1"}'
+        values: "0+100x30"
+      - series: 'agent_request_latency_seconds_bucket{prompt_version="v1.0.0", route="/ask", le="0.5"}'
+        values: "0+100x30"
+      - series: 'agent_request_latency_seconds_bucket{prompt_version="v1.0.0", route="/ask", le="1.0"}'
+        values: "0+100x30"
+      - series: 'agent_request_latency_seconds_bucket{prompt_version="v1.0.0", route="/ask", le="+Inf"}'
+        values: "0+100x30"
+    alert_rule_test:
+      - eval_time: 25m
+        alertname: HighLatencyP95
+        exp_alerts: []
