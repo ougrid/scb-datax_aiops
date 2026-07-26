@@ -1,0 +1,31 @@
+# Minimal routing tree: severity decides urgency, not just where an alert lands.
+# Receivers are placeholder webhooks - wiring a real channel (PagerDuty for
+# critical, Slack for warning) is an ops/secrets concern out of scope for this
+# repo, but the routing structure an on-call engineer depends on is real and
+# testable (`amtool config routes test`), not decorative.
+
+route:
+  receiver: default
+  group_by: ["alertname"]
+  group_wait: 30s
+  group_interval: 5m
+  repeat_interval: 4h
+  routes:
+    - match:
+        severity: critical
+      receiver: critical
+      repeat_interval: 1h
+    - match:
+        severity: warning
+      receiver: warning
+
+receivers:
+  - name: default
+  - name: critical
+    webhook_configs:
+      - url: "http://localhost:5001/critical"
+        send_resolved: true
+  - name: warning
+    webhook_configs:
+      - url: "http://localhost:5001/warning"
+        send_resolved: true

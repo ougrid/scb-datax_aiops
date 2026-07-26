@@ -1,5 +1,3 @@
-version: '3.8'
-
 services:
   # LLM Agent API Service
   agent-api:
@@ -12,6 +10,7 @@ services:
     environment:
       - PROMPT_VERSION=${PROMPT_VERSION:-v1.0.0}
       - PORT=8080
+      - GIT_SHA=${GIT_SHA:-unknown}
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8080/healthz"]
       interval: 10s
@@ -52,6 +51,18 @@ services:
       - '--config.file=/etc/prometheus/prometheus.yml'
       - '--storage.tsdb.path=/prometheus'
       - '--web.enable-lifecycle'
+    networks:
+      - aiops-network
+
+  # Alertmanager
+  alertmanager:
+    image: prom/alertmanager:v0.27.0
+    container_name: alertmanager
+    ports:
+      - "9093:9093"
+    volumes:
+      - ./alertmanager/alertmanager.yml:/etc/alertmanager/alertmanager.yml:ro
+      - alertmanager-data:/alertmanager
     networks:
       - aiops-network
 
@@ -102,3 +113,4 @@ networks:
 volumes:
   prometheus-data:
   grafana-data:
+  alertmanager-data:

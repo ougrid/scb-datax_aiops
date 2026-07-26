@@ -10,28 +10,135 @@ groups:
           summary: "Agent API is down"
           description: "The agent API has been unreachable for more than 1 minute."
 
-      # TODO: Implement alerting for abnormal rejection rates
-      # Consider: What rejection rate is "normal" for this system?
-      #           How do you distinguish a real problem from noise?
-      # 
-      # Observe the running system before setting thresholds.
-      - alert: HighRejectionRate
-        expr: vector(0) > 1
+      # `up == 0` requires the series to exist. If the scrape target is removed
+      # (container deleted, service discovery change) the series goes absent, not
+      # zero, and AgentAPIDown never fires - this is the complement.
+      - alert: AgentAPITargetMissing
+        expr: absent(up{job="agent-api"})
         for: 5m
         labels:
-          severity: warning
+          severity: critical
         annotations:
-          summary: "TODO"
-          description: "TODO"
+          summary: "Prometheus has no agent-api scrape target"
+          description: "The agent-api target has disappeared from service discovery for 5m. This is not the same failure as AgentAPIDown - check `docker compose ps` and the Prometheus targets page (/targets), not just the app logs."
 
-      # TODO: Implement alerting for sudden changes in rejection behavior
-      # Consider: What constitutes a "spike" vs normal variance?
-      #           How do you compare current behavior to baseline?
+      # Baseline live rejection rate is ~15% (traffic-generator's REJECTION_MIX_RATIO),
+      # with a measured 5m-window 3-sigma noise band of ~10.6-19.4%. 30% sits far
+      # outside that noise but still catches a real doubling of adversarial traffic.
+      # `for: 10m` (two 5m windows) so a single noisy sample can't page anyone.
+      - alert: HighRejectionRate
+        expr: >
+          (
+            sum(rate(agent_rejections_total[5m]))
+            /
+            sum(rate(agent_requests_total{route="/ask"}[5m]))
+          ) > 0.30
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Rejection rate is {{ $value | humanizePercentage }}, above the 30% threshold"
+          description: "Sustained for 10m+. Check which category is driving it: sum by (reason) (rate(agent_rejections_total[5m])). If one reason dominates, that's the likely cause (bad prompt-version rollout for under-rejection's opposite case, an attack, or a client bug retrying rejected requests)."
+          runbook_url: "docs/incident-response.md"
+
+      # Detects a fast-moving change even from an unusually low base, without firing
+      # on ordinary 2%->5% wobble: the ratio check needs BOTH the relative jump
+      # (2x the trailing hour) and an absolute floor (>25%, itself outside the
+      # 5m noise band) to fire.
       - alert: RejectionRateSpike
-        expr: vector(0) > 1
+        expr: >
+          (
+            sum(rate(agent_rejections_total[5m]))
+            /
+            sum(rate(agent_requests_total{route="/ask"}[5m]))
+          )
+          >
+          2 * (
+            sum(rate(agent_rejections_total[1h]))
+            /
+            sum(rate(agent_requests_total{route="/ask"}[1h]))
+          )
+          and
+          (
+            sum(rate(agent_rejections_total[5m]))
+            /
+            sum(rate(agent_requests_total{route="/ask"}[5m]))
+          ) > 0.25
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Rejection rate has more than doubled versus the trailing hour"
+          description: "Current 5m rate is {{ $value | humanizePercentage }} of requests. Compare against agent_build_info to check for a recent deploy, and by-reason breakdown to identify the attack class."
+          runbook_url: "docs/incident-response.md"
+
+      # The more dangerous failure mode for a safety filter is under-rejection, not
+      # over-rejection: a regressed classifier or bad rollout means adversarial
+      # traffic starts getting answered. Mirrors the CI eval gate's
+      # min_adversarial_rejection_rate=0.60 at runtime, against live mixed traffic
+      # rather than the eval dataset alone. 15m floor is ~12.4%, so 5% leaves a
+      # wide margin - this only fires if rejection has genuinely broken.
+      - alert: LowRejectionRate
+        expr: >
+          (
+            sum(rate(agent_rejections_total[15m]))
+            /
+            sum(rate(agent_requests_total{route="/ask"}[15m]))
+          ) < 0.05
+        for: 15m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Rejection rate has dropped to {{ $value | humanizePercentage }} - safety filter may be failing"
+          description: "Treat as a security incident, not a metrics quirk: reproduce with `make test-reject` and re-run the eval suite (docker compose run --rm eval-runner) to confirm the classifier is still rejecting the adversarial dataset."
+          runbook_url: "docs/incident-response.md"
+
+      # A dead traffic generator leaves `up == 1` and every rate-based panel flat
+      # at zero rather than red - this is the only alert that catches it.
+      - alert: NoTraffic
+        # sum() first: agent_requests_total{route="/ask"} has one series per
+        # `status`, and each would independently satisfy `== 0` the moment
+        # traffic stops, firing four alerts instead of one.
+        expr: sum(rate(agent_requests_total{route="/ask"}[5m])) == 0
         for: 5m
         labels:
           severity: warning
         annotations:
-          summary: "TODO"
-          description: "TODO"
+          summary: "No /ask requests in the last 5 minutes"
+          description: "Check `docker compose ps traffic-generator` and its logs. up{job=\"agent-api\"} being 1 here means the API itself is healthy - this is a traffic-source problem, not an API outage."
+
+      # Baseline is 0 errors. 1% is above single-request noise at the measured
+      # ~2 req/s but still catches a real regression within one 5m window.
+      - alert: HighErrorRate
+        expr: >
+          (
+            (sum(rate(agent_requests_total{status="error"}[5m])) or vector(0))
+            /
+            sum(rate(agent_requests_total[5m]))
+          ) > 0.01
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Error rate is {{ $value | humanizePercentage }}, above 1%"
+          description: "Check `docker compose logs agent-api` for tracebacks. Unlike rejections (200s), this is 500s - an unhandled exception, not policy behavior."
+
+      # Measured mean latency is ~90us with p95 well under 1ms; buckets were
+      # rescaled to sub-millisecond resolution specifically so this alert is
+      # meaningful (on the original 5ms-floor buckets, p95 was a constant
+      # 4.75ms and this could never fire). 50ms is ~500x the observed p95 -
+      # deliberately loose, because on this workload approaching it means
+      # something pathological (GC pause, resource exhaustion, a dependency
+      # appearing), not normal variance.
+      - alert: HighLatencyP95
+        expr: >
+          histogram_quantile(
+            0.95,
+            sum by (le) (rate(agent_request_latency_seconds_bucket{route="/ask"}[5m]))
+          ) > 0.05
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "p95 latency is {{ $value | humanizeDuration }}, above 50ms"
+          description: "50ms is ~500x the measured baseline p95 (sub-millisecond), so this indicates a real regression - check for resource exhaustion (docker stats) or a change in request handling, not normal jitter."

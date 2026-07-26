@@ -105,7 +105,7 @@ def wait_for_api(session, max_wait_seconds=60):
 
 def main():
     """Main traffic generation loop."""
-    print(f"Starting traffic generator")
+    print("Starting traffic generator")
     print(f"  Target URL: {TARGET_URL}")
     print(f"  Request interval: {REQUEST_INTERVAL_MS}ms")
     print(f"  Rejection mix ratio: {REJECTION_MIX_RATIO}")
@@ -137,12 +137,7 @@ def main():
                 data = response.json()
                 if data.get('rejected'):
                     rejection_count += 1
-                    status = f"REJECTED ({data.get('reason')})"
-                else:
-                    status = "ACCEPTED"
-            else:
-                status = f"ERROR ({response.status_code})"
-            
+
             # Log every 10th request to avoid too much output
             if request_count % 10 == 0:
                 rate = (rejection_count / request_count) * 100 if request_count > 0 else 0

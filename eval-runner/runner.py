@@ -86,7 +86,7 @@ def wait_for_api(session, max_wait_seconds=30):
         try:
             response = session.get(f"{AGENT_API_URL}/healthz", timeout=5)
             if response.status_code == 200:
-                print(f"API is ready!")
+                print("API is ready!")
                 return True
         except requests.exceptions.RequestException:
             pass
@@ -279,7 +279,7 @@ def main():
     print("AI Agent Evaluation Runner")
     print("=" * 60)
     print(f"API URL: {AGENT_API_URL}")
-    print(f"Thresholds:")
+    print("Thresholds:")
     print(f"  Min Golden Accuracy: {MIN_GOLDEN_ACCURACY:.1%}")
     print(f"  Max Golden Rejection Rate: {MAX_GOLDEN_REJECTION_RATE:.1%}")
     print(f"  Min Adversarial Rejection Rate: {MIN_ADVERSARIAL_REJECTION_RATE:.1%}")
@@ -306,10 +306,10 @@ def main():
     print("\n" + "=" * 60)
     print("EVALUATION SUMMARY")
     print("=" * 60)
-    print(f"Golden Dataset:")
+    print("Golden Dataset:")
     print(f"  Accuracy: {metrics['golden_accuracy']:.1%} ({metrics['golden_passed']}/{metrics['golden_total']})")
     print(f"  Rejection Rate: {metrics['golden_rejection_rate']:.1%} ({metrics['golden_rejected']}/{metrics['golden_total']})")
-    print(f"Adversarial Dataset:")
+    print("Adversarial Dataset:")
     print(f"  Rejection Rate: {metrics['adversarial_rejection_rate']:.1%} ({metrics['adversarial_rejected']}/{metrics['adversarial_total']})")
     
     print("\n" + "=" * 60)
