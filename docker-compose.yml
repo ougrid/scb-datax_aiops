@@ -12,6 +12,7 @@ services:
     environment:
       - PROMPT_VERSION=${PROMPT_VERSION:-v1.0.0}
       - PORT=8080
+      - GIT_SHA=${GIT_SHA:-unknown}
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8080/healthz"]
       interval: 10s
