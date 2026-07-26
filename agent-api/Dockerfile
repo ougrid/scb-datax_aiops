@@ -22,4 +22,9 @@ EXPOSE 8080
 # scrape would make counters look like they reset. One worker keeps one registry;
 # threads give real concurrency for this I/O-light app. Scale horizontally via
 # replicas (see deployment/manifest.yml) instead of adding workers here.
-CMD ["sh", "-c", "gunicorn --bind 0.0.0.0:${PORT:-8080} --workers 1 --threads 8 app:app"]
+#
+# --access-logfile -: unlike Flask's dev server, gunicorn logs no per-request
+# line by default. Without this, `docker compose logs agent-api` shows nothing
+# but startup banners - discovered by walking the incident-response runbook
+# against a live traffic spike and finding the log-grep step returned nothing.
+CMD ["sh", "-c", "gunicorn --bind 0.0.0.0:${PORT:-8080} --workers 1 --threads 8 --access-logfile - app:app"]
