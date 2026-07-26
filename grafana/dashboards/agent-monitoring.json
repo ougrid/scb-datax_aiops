@@ -95,7 +95,7 @@
             "uid": "PBFA97CFB590B2093"
           },
           "editorMode": "code",
-          "expr": "rate(agent_requests_total{route=\"/ask\"}[1m])",
+          "expr": "sum by (prompt_version) (rate(agent_requests_total{route=\"/ask\"}[1m]))",
           "legendFormat": "{{prompt_version}}",
           "range": true,
           "refId": "A"
@@ -109,7 +109,7 @@
         "type": "prometheus",
         "uid": "PBFA97CFB590B2093"
       },
-      "description": "TODO: This panel should help operators understand rejection behavior. Consider what dimensions are useful for debugging.",
+      "description": "Share of /ask traffic rejected, by reason, over a 5m window.",
       "fieldConfig": {
         "defaults": {
           "color": {
@@ -159,11 +159,11 @@
               },
               {
                 "color": "yellow",
-                "value": 0.05
+                "value": 0.25
               },
               {
                 "color": "red",
-                "value": 0.08
+                "value": 0.3
               }
             ]
           },
@@ -197,13 +197,13 @@
             "uid": "PBFA97CFB590B2093"
           },
           "editorMode": "code",
-          "expr": "vector(0)",
-          "legendFormat": "TODO: Implement rejection rate query",
+          "expr": "sum by (reason) (rate(agent_rejections_total[5m])) / scalar(sum(rate(agent_requests_total{route=\"/ask\"}[5m])))",
+          "legendFormat": "{{reason}}",
           "range": true,
           "refId": "A"
         }
       ],
-      "title": "Rejection Rate (TODO: FIX THIS PANEL)",
+      "title": "Rejection Rate by Reason",
       "type": "timeseries"
     },
     {
@@ -292,13 +292,13 @@
             "uid": "PBFA97CFB590B2093"
           },
           "editorMode": "code",
-          "expr": "vector(0)",
-          "legendFormat": "TODO",
+          "expr": "sum by (reason) (rate(agent_rejections_total[5m]))",
+          "legendFormat": "{{reason}}",
           "range": true,
           "refId": "A"
         }
       ],
-      "title": "Rejections by Reason (TODO: FIX)",
+      "title": "Rejections by Reason (rate/s)",
       "type": "timeseries"
     },
     {
@@ -428,11 +428,11 @@
               },
               {
                 "color": "yellow",
-                "value": 0.05
+                "value": 0.25
               },
               {
                 "color": "red",
-                "value": 0.08
+                "value": 0.3
               }
             ]
           },
@@ -466,13 +466,13 @@
             "uid": "PBFA97CFB590B2093"
           },
           "editorMode": "code",
-          "expr": "vector(0)",
-          "legendFormat": "TODO",
+          "expr": "sum(rate(agent_rejections_total[5m])) / sum(rate(agent_requests_total{route=\"/ask\"}[5m]))",
+          "legendFormat": "rejection rate",
           "range": true,
           "refId": "A"
         }
       ],
-      "title": "Overall Rejection Rate (TODO: FIX)",
+      "title": "Overall Rejection Rate",
       "type": "stat"
     },
     {
@@ -677,6 +677,123 @@
       ],
       "title": "API Status",
       "type": "stat"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "PBFA97CFB590B2093"
+      },
+      "description": "Requests that hit an unhandled error, not a policy rejection.",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "red",
+                "value": 0.01
+              }
+            ]
+          },
+          "unit": "percentunit"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 6,
+        "x": 0,
+        "y": 20
+      },
+      "id": 9,
+      "options": {
+        "colorMode": "value",
+        "graphMode": "area",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "reduceOptions": {
+          "calcs": ["lastNotNull"],
+          "fields": "",
+          "values": false
+        },
+        "textMode": "auto"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "PBFA97CFB590B2093"
+          },
+          "editorMode": "code",
+          "expr": "(sum(rate(agent_requests_total{status=\"error\"}[5m])) or vector(0)) / sum(rate(agent_requests_total[5m]))",
+          "legendFormat": "__auto",
+          "range": true,
+          "refId": "A"
+        }
+      ],
+      "title": "Error Rate",
+      "type": "stat"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "PBFA97CFB590B2093"
+      },
+      "description": "What's actually running - ties a metrics change to a specific deploy.",
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "align": "auto",
+            "displayMode": "auto"
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 6,
+        "x": 6,
+        "y": 20
+      },
+      "id": 10,
+      "options": {
+        "showHeader": true
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "PBFA97CFB590B2093"
+          },
+          "editorMode": "code",
+          "expr": "agent_build_info",
+          "format": "table",
+          "instant": true,
+          "legendFormat": "__auto",
+          "range": false,
+          "refId": "A"
+        }
+      ],
+      "title": "Build Info",
+      "type": "table"
     }
   ],
   "refresh": "5s",
