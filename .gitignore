@@ -16,6 +16,9 @@ ENV/
 *.swp
 *.swo
 
+# Local agent/assistant workspace
+.claude/
+
 # OS
 .DS_Store
 Thumbs.db
