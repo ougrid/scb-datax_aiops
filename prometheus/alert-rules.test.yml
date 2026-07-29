@@ -289,3 +289,30 @@ tests:
       - eval_time: 25m
         alertname: HighLatencyP95
         exp_alerts: []
+
+  # --- AlertmanagerDown --------------------------------------------------------
+
+  - interval: 1m
+    input_series:
+      - series: 'up{job="alertmanager", instance="alertmanager:9093"}'
+        values: "0x10"
+    alert_rule_test:
+      - eval_time: 5m
+        alertname: AlertmanagerDown
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+              job: alertmanager
+              instance: alertmanager:9093
+            exp_annotations:
+              summary: "Alertmanager is down - alerts are not being delivered"
+              description: "Prometheus rules still evaluate but nothing routes, so an empty inbox is not evidence of health. Check `docker compose ps alertmanager` and its logs, then re-check the dashboards directly for anything that fired during the outage."
+
+  - interval: 1m
+    input_series:
+      - series: 'up{job="alertmanager", instance="alertmanager:9093"}'
+        values: "1x10"
+    alert_rule_test:
+      - eval_time: 5m
+        alertname: AlertmanagerDown
+        exp_alerts: []

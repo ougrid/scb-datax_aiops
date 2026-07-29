@@ -20,3 +20,7 @@ scrape_configs:
       - targets: ['agent-api:8080']
     metrics_path: /metrics
     scrape_interval: 5s
+
+  - job_name: 'alertmanager'
+    static_configs:
+      - targets: ['alertmanager:9093']

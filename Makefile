@@ -19,7 +19,7 @@ help:
 
 # Start the full stack
 up: build
-	docker-compose up -d
+	docker compose up -d
 	@echo ""
 	@echo "Stack is starting..."
 	@echo "  Agent API:     http://localhost:8080"
@@ -30,24 +30,24 @@ up: build
 
 # Stop all services
 down:
-	docker-compose down
+	docker compose down
 
 # View logs
 logs:
-	docker-compose logs -f
+	docker compose logs -f
 
 # Build Docker images
 build:
-	docker-compose build
+	docker compose build
 
 # Run evaluation suite
 eval:
 	@echo "Running evaluation suite..."
-	docker-compose run --rm eval-runner
+	docker compose run --rm eval-runner
 
 # Clean up everything
 clean:
-	docker-compose down -v --rmi local
+	docker compose down -v --rmi local
 	rm -rf eval-results/
 
 # Quick health check

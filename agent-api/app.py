@@ -38,6 +38,16 @@ REQUEST_LATENCY = Histogram(
     buckets=[0.0001, 0.00025, 0.0005, 0.001, 0.0025, 0.005, 0.01, 0.025, 0.1, 0.5, 1.0]
 )
 
+# Saturation - the one golden signal the other three can't stand in for. gunicorn
+# runs --threads 8, so 8 is a hard concurrency ceiling: sustained in-flight near it
+# means requests are queueing behind the thread pool. Latency shows that too, but
+# later and as a symptom. No `route` label - the ceiling is per-process.
+INFLIGHT = Gauge(
+    'agent_inflight_requests',
+    'Requests currently being handled (thread-pool saturation; ceiling is 8)',
+    ['prompt_version']
+)
+
 # Identifies what's actually running, so "did a deploy cause this" is a PromQL query
 # instead of a Slack archaeology exercise.
 BUILD_INFO = Gauge(
@@ -46,6 +56,25 @@ BUILD_INFO = Gauge(
     ['prompt_version', 'git_sha']
 )
 BUILD_INFO.labels(prompt_version=PROMPT_VERSION, git_sha=GIT_SHA).set(1)
+
+# Deliberately not instrumented - these absences are decisions, not gaps:
+#
+# - Tokens and cost (OpenTelemetry's gen_ai.client.token.usage), and streaming
+#   timings (time_to_first_chunk). This service has no model: generate_response()
+#   returns one of four fixed strings and nothing streams. A token count here would
+#   be invented, and someone would eventually alert on it. The mapping that does
+#   hold: agent_request_latency_seconds is the local gen_ai.client.operation.duration,
+#   and prompt_version does the job gen_ai.request.model would.
+# - Latency split by status. The rejected path short-circuits on the first matching
+#   pattern; the accepted path has to fail all 26. Measured over 200 requests each,
+#   the difference was noise (p50 3.35ms vs 3.82ms end-to-end), so it isn't worth
+#   quadrupling an 11-bucket histogram.
+# - Per-client labels. Unbounded values belong in logs or traces, not metrics.
+#
+# The metric this service most needs and cannot have: the classifier's false-positive
+# rate. Live traffic carries no ground truth, so nothing here separates "correctly
+# rejected an attack" from "wrongly rejected a real user" - the question
+# docs/incident-response.md opens with. See its §5.
 
 # Rejection patterns - deterministic classification based on message content
 REJECTION_PATTERNS = {
@@ -132,6 +161,7 @@ def ask():
     # raising, so an unhandled exception is still counted (via `finally`) as an error
     # rather than silently inflating a healthy-looking request count.
     status = 'error'
+    INFLIGHT.labels(prompt_version=PROMPT_VERSION).inc()
 
     try:
         # silent=True returns None instead of raising on missing/invalid content-type
@@ -170,6 +200,7 @@ def ask():
         latency = time.time() - start_time
         REQUEST_COUNT.labels(prompt_version=PROMPT_VERSION, route='/ask', status=status).inc()
         REQUEST_LATENCY.labels(prompt_version=PROMPT_VERSION, route='/ask').observe(latency)
+        INFLIGHT.labels(prompt_version=PROMPT_VERSION).dec()
 
 
 @app.route('/healthz', methods=['GET'])
