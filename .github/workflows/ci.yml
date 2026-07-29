@@ -56,6 +56,13 @@ jobs:
           docker run --rm --entrypoint /bin/promtool \
             -v "${{ github.workspace }}/prometheus:/etc/prometheus:ro" -w /etc/prometheus \
             prom/prometheus:v2.47.0 test rules alert-rules.test.yml
+      # Nothing else validates the Alertmanager routing tree, and a typo there
+      # means alerts route nowhere - a silent failure exactly when it matters.
+      - name: Validate Alertmanager config
+        run: |
+          docker run --rm --entrypoint /bin/amtool \
+            -v "${{ github.workspace }}/alertmanager:/etc/alertmanager:ro" \
+            prom/alertmanager:v0.27.0 check-config /etc/alertmanager/alertmanager.yml
 
   unit-test:
     runs-on: ubuntu-latest
