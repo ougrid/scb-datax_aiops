@@ -142,3 +142,20 @@ groups:
         annotations:
           summary: "p95 latency is {{ $value | humanizeDuration }}, above 50ms"
           description: "50ms is ~500x the measured baseline p95 (sub-millisecond), so this indicates a real regression - check for resource exhaustion (docker stats) or a change in request handling, not normal jitter."
+
+      # Alertmanager is the delivery path for every rule above, and until now it was
+      # the one component with no health signal: if it dies, alerts still evaluate
+      # but route nowhere, and the dashboards stay green. 2m because a restart is
+      # routine and shouldn't page; a sustained outage means we are flying blind.
+      # Known limit: this cannot fire if the target is removed entirely (the series
+      # goes absent, not zero), and Prometheus cannot alert on its own death. The
+      # general answer is an external heartbeat - recorded as a gap in
+      # docs/incident-response.md §5 rather than half-built here.
+      - alert: AlertmanagerDown
+        expr: up{job="alertmanager"} == 0
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Alertmanager is down - alerts are not being delivered"
+          description: "Prometheus rules still evaluate but nothing routes, so an empty inbox is not evidence of health. Check `docker compose ps alertmanager` and its logs, then re-check the dashboards directly for anything that fired during the outage."

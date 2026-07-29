@@ -14,6 +14,12 @@ around the 15% baseline is **~10.6%-19.4%**. A 1-minute window's own noise band 
 (~5%-25%) - wide enough that no threshold in that range can avoid flapping, so no alert here uses
 a window shorter than 5 minutes.
 
+This baseline assumes the classifier is accurate on real traffic, and that assumption is
+load-bearing: the eval sets it scores 100% on contain nothing near the policy boundary, and bare
+patterns like `password` reject ordinary questions (see `docs/incident-response.md` §5). A shift in
+traffic *mix* would move this rate with the filter working exactly as written, so treat
+`HighRejectionRate` as "the ratio moved", not "the classifier broke".
+
 The dashboard shipped with rejection-rate thresholds at yellow 5% / red 8% - *below* the healthy
 baseline. Those would render red permanently. This is the mistake the exercise is checking for.
 

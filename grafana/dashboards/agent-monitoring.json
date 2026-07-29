@@ -95,7 +95,7 @@
             "uid": "PBFA97CFB590B2093"
           },
           "editorMode": "code",
-          "expr": "sum by (prompt_version) (rate(agent_requests_total{route=\"/ask\"}[1m]))",
+          "expr": "sum by (prompt_version) (rate(agent_requests_total{route=\"/ask\", prompt_version=~\"$prompt_version\"}[1m]))",
           "legendFormat": "{{prompt_version}}",
           "range": true,
           "refId": "A"
@@ -197,7 +197,7 @@
             "uid": "PBFA97CFB590B2093"
           },
           "editorMode": "code",
-          "expr": "sum by (reason) (rate(agent_rejections_total[5m])) / scalar(sum(rate(agent_requests_total{route=\"/ask\"}[5m])))",
+          "expr": "sum by (reason) (rate(agent_rejections_total{prompt_version=~\"$prompt_version\"}[5m])) / scalar(sum(rate(agent_requests_total{route=\"/ask\", prompt_version=~\"$prompt_version\"}[5m])))",
           "legendFormat": "{{reason}}",
           "range": true,
           "refId": "A"
@@ -292,7 +292,7 @@
             "uid": "PBFA97CFB590B2093"
           },
           "editorMode": "code",
-          "expr": "sum by (reason) (rate(agent_rejections_total[5m]))",
+          "expr": "sum by (reason) (rate(agent_rejections_total{prompt_version=~\"$prompt_version\"}[5m]))",
           "legendFormat": "{{reason}}",
           "range": true,
           "refId": "A"
@@ -387,7 +387,7 @@
             "uid": "PBFA97CFB590B2093"
           },
           "editorMode": "code",
-          "expr": "histogram_quantile(0.95, rate(agent_request_latency_seconds_bucket{route=\"/ask\"}[5m]))",
+          "expr": "histogram_quantile(0.95, rate(agent_request_latency_seconds_bucket{route=\"/ask\", prompt_version=~\"$prompt_version\"}[5m]))",
           "legendFormat": "p95 {{prompt_version}}",
           "range": true,
           "refId": "A"
@@ -398,7 +398,7 @@
             "uid": "PBFA97CFB590B2093"
           },
           "editorMode": "code",
-          "expr": "histogram_quantile(0.50, rate(agent_request_latency_seconds_bucket{route=\"/ask\"}[5m]))",
+          "expr": "histogram_quantile(0.50, rate(agent_request_latency_seconds_bucket{route=\"/ask\", prompt_version=~\"$prompt_version\"}[5m]))",
           "hide": false,
           "legendFormat": "p50 {{prompt_version}}",
           "range": true,
@@ -466,7 +466,7 @@
             "uid": "PBFA97CFB590B2093"
           },
           "editorMode": "code",
-          "expr": "sum(rate(agent_rejections_total[5m])) / sum(rate(agent_requests_total{route=\"/ask\"}[5m]))",
+          "expr": "sum(rate(agent_rejections_total{prompt_version=~\"$prompt_version\"}[5m])) / sum(rate(agent_requests_total{route=\"/ask\", prompt_version=~\"$prompt_version\"}[5m]))",
           "legendFormat": "rejection rate",
           "range": true,
           "refId": "A"
@@ -525,7 +525,7 @@
             "uid": "PBFA97CFB590B2093"
           },
           "editorMode": "code",
-          "expr": "sum(agent_requests_total{route=\"/ask\"})",
+          "expr": "sum(agent_requests_total{route=\"/ask\", prompt_version=~\"$prompt_version\"})",
           "legendFormat": "__auto",
           "range": true,
           "refId": "A"
@@ -584,7 +584,7 @@
             "uid": "PBFA97CFB590B2093"
           },
           "editorMode": "code",
-          "expr": "sum(agent_rejections_total)",
+          "expr": "sum(agent_rejections_total{prompt_version=~\"$prompt_version\"})",
           "legendFormat": "__auto",
           "range": true,
           "refId": "A"
@@ -733,13 +733,55 @@
             "uid": "PBFA97CFB590B2093"
           },
           "editorMode": "code",
-          "expr": "(sum(rate(agent_requests_total{status=\"error\"}[5m])) or vector(0)) / sum(rate(agent_requests_total[5m]))",
+          "expr": "(sum(rate(agent_requests_total{status=\"error\", prompt_version=~\"$prompt_version\"}[5m])) or vector(0)) / sum(rate(agent_requests_total{prompt_version=~\"$prompt_version\"}[5m]))",
           "legendFormat": "__auto",
           "range": true,
           "refId": "A"
         }
       ],
       "title": "Error Rate",
+      "type": "stat"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "PBFA97CFB590B2093" },
+      "description": "Concurrent requests in flight. gunicorn runs 8 threads, so sustained values near 8 mean requests are queueing behind the pool.",
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "thresholds" },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "yellow", "value": 4 },
+              { "color": "red", "value": 6 }
+            ]
+          },
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "gridPos": { "h": 4, "w": 6, "x": 12, "y": 20 },
+      "id": 11,
+      "options": {
+        "colorMode": "value",
+        "graphMode": "area",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
+        "textMode": "auto"
+      },
+      "targets": [
+        {
+          "datasource": { "type": "prometheus", "uid": "PBFA97CFB590B2093" },
+          "editorMode": "code",
+          "expr": "sum(agent_inflight_requests{prompt_version=~\"$prompt_version\"})",
+          "legendFormat": "__auto",
+          "range": true,
+          "refId": "A"
+        }
+      ],
+      "title": "In-flight Requests",
       "type": "stat"
     },
     {
@@ -784,7 +826,7 @@
             "uid": "PBFA97CFB590B2093"
           },
           "editorMode": "code",
-          "expr": "agent_build_info",
+          "expr": "agent_build_info{prompt_version=~\"$prompt_version\"}",
           "format": "table",
           "instant": true,
           "legendFormat": "__auto",
@@ -800,7 +842,29 @@
   "schemaVersion": 38,
   "tags": ["agent", "monitoring"],
   "templating": {
-    "list": []
+    "list": [
+      {
+        "current": {},
+        "datasource": { "type": "prometheus", "uid": "PBFA97CFB590B2093" },
+        "definition": "label_values(agent_build_info, prompt_version)",
+        "hide": 0,
+        "includeAll": true,
+        "allValue": ".*",
+        "multi": true,
+        "label": "prompt version",
+        "name": "prompt_version",
+        "options": [],
+        "query": {
+          "query": "label_values(agent_build_info, prompt_version)",
+          "refId": "PrometheusVariableQueryEditor-VariableQuery"
+        },
+        "refresh": 2,
+        "regex": "",
+        "skipUrlSync": false,
+        "sort": 1,
+        "type": "query"
+      }
+    ]
   },
   "time": {
     "from": "now-15m",
