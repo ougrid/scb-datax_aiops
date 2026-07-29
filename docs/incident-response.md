@@ -118,6 +118,25 @@ docker compose up -d --build agent-api
 docker compose run --rm eval-runner   # confirm gates pass before declaring the rollback done
 ```
 
+**Who gets woken, by severity** (`alertmanager/alertmanager.yml`): `critical` routes to the paging
+receiver and repeats hourly until resolved — `AgentAPIDown`, `AgentAPITargetMissing`,
+`LowRejectionRate`, `HighErrorRate`, `AlertmanagerDown`. `warning` routes to chat and repeats every
+4h — `HighRejectionRate`, `RejectionRateSpike`, `NoTraffic`, `HighLatencyP95`. If a page woke you,
+it was one of the first group.
+
+**Resolution criteria** — you can stop watching when all four hold:
+
+1. The driving rule is back to `inactive` in Prometheus (`/alerts`), not merely quiet. `for:`
+   durations mean the firing state lags recovery by 10-15m, so read the rule state rather than
+   inferring from silence.
+2. `docker compose run --rm eval-runner` passes all three gates.
+3. The 5m rejection rate has been inside the 10.6%-19.4% baseline band for 15 minutes. One window
+   is not evidence.
+4. If you rolled back, `agent_build_info` reports the SHA you intended, not the bad one.
+
+If 1-3 hold but you never found the cause, that is an incident with a quiet symptom, not a fixed
+one. Hand it over rather than closing it.
+
 ## 4. Post-incident
 
 - **Reconstruct the timeline** from Prometheus (it retains history across the incident window):
@@ -148,3 +167,7 @@ docker compose run --rm eval-runner   # confirm gates pass before declaring the 
 - **No rate limiting or auth on `/ask`.** An attack alert can identify the problem but this
   service has no built-in lever to actively throttle it - mitigation for a genuine flood
   requires a layer that doesn't exist in this repo yet.
+- **No external heartbeat for the alert pipeline.** `AlertmanagerDown` covers Alertmanager
+  crashing while Prometheus still scrapes it, but nothing catches Prometheus itself dying or the
+  scrape target disappearing - a dead monitoring stack looks identical to silence. The standard fix
+  is a Watchdog alert routed to an external heartbeat service; not built here.
