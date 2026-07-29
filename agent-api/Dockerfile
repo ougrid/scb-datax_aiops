@@ -21,7 +21,11 @@ EXPOSE 8080
 # expose only their own partial counts - whichever worker answers a given /metrics
 # scrape would make counters look like they reset. One worker keeps one registry;
 # threads give real concurrency for this I/O-light app. Scale horizontally via
-# replicas (see deployment/manifest.yml) instead of adding workers here.
+# replicas (see deployment/manifest.yml) instead of adding workers here - but
+# only with each replica scraped as its own Prometheus target. Behind a single
+# service endpoint the per-process registry fails the same way across replicas
+# as it does across workers; the compose setup here does not model that, so
+# `replicas: 2` in the manifest is aspirational, not verified.
 #
 # --access-logfile -: unlike Flask's dev server, gunicorn logs no per-request
 # line by default. Without this, `docker compose logs agent-api` shows nothing
