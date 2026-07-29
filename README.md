@@ -25,6 +25,7 @@ make down
 | Agent API | http://localhost:8080 | - |
 | Metrics | http://localhost:8080/metrics | - |
 | Prometheus | http://localhost:9090 | - |
+| Alertmanager | http://localhost:9093 | - |
 | Grafana | http://localhost:3000 | admin/admin |
 
 ## Architecture
@@ -37,10 +38,10 @@ make down
                                  │
                                  │ /metrics
                                  ▼
-                        ┌─────────────────┐
-                        │   Prometheus    │
-                        │   (Port 9090)   │
-                        └────────┬────────┘
+                        ┌─────────────────┐     ┌─────────────────┐
+                        │   Prometheus    │────▶│  Alertmanager   │
+                        │   (Port 9090)   │     │   (Port 9093)   │
+                        └────────┬────────┘     └─────────────────┘
                                  │
                                  ▼
                         ┌─────────────────┐
@@ -98,9 +99,13 @@ The agent rejects requests based on content patterns:
 
 | Metric | Type | Labels |
 |--------|------|--------|
-| `agent_requests_total` | Counter | `prompt_version`, `route` |
+| `agent_requests_total` | Counter | `prompt_version`, `route`, `status` |
 | `agent_rejections_total` | Counter | `prompt_version`, `reason` |
 | `agent_request_latency_seconds` | Histogram | `prompt_version`, `route` |
+| `agent_build_info` | Gauge | `prompt_version`, `git_sha` |
+
+`status` is one of `accepted`, `rejected`, `invalid_request`, `error`. Rejections are HTTP 200
+responses, so `status` is the only thing that separates policy behaviour from actual failures.
 
 ## Evaluation Runner
 
@@ -133,6 +138,23 @@ Environment variables:
 | `PROMPT_VERSION` | v1.0.0 | Version string included in responses/metrics |
 | `REQUEST_INTERVAL_MS` | 500 | Traffic generator request interval |
 | `REJECTION_MIX_RATIO` | 0.15 | Ratio of rejection-triggering traffic |
+
+## Changes in this fork
+
+- **CI/CD** — `.github/workflows/ci.yml`: lint → config validation → unit tests → image build →
+  integration with the eval gate → deployment record in `deployment/manifest.yml`.
+- **Alerting** — `prometheus/alert-rules.yml` (9 rules), behaviour-tested in
+  `prometheus/alert-rules.test.yml`. Threshold derivation:
+  [docs/alerting-rationale.md](./docs/alerting-rationale.md).
+- **Incident response** — [docs/incident-response.md](./docs/incident-response.md), the 3am
+  rejection-spike runbook.
+- **Metrics** — `agent-api/app.py`: `status` added to `agent_requests_total`, plus
+  `agent_rejections_total` and `agent_build_info`; latency buckets rescaled to sub-millisecond
+  after the originals put every request in one bucket.
+- **Dashboard** — `grafana/dashboards/agent-monitoring.json`: broken panels fixed, error-rate and
+  build-info panels added, `prompt_version` template variable.
+- **Alertmanager** — `alertmanager/alertmanager.yml`: severity-based routing, `critical` paging and
+  `warning` to chat.
 
 ## For Candidates
 
