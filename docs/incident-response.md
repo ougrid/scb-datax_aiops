@@ -171,3 +171,11 @@ one. Hand it over rather than closing it.
   crashing while Prometheus still scrapes it, but nothing catches Prometheus itself dying or the
   scrape target disappearing - a dead monitoring stack looks identical to silence. The standard fix
   is a Watchdog alert routed to an external heartbeat service; not built here.
+- **The classifier's false-positive rate is not measurable from metrics.** Live traffic has no
+  ground truth, so no counter separates a correct rejection from a wrongly-rejected real user -
+  the question §1 opens with. Worse, the eval gate cannot detect it either: the golden dataset is
+  the same 20 messages the traffic generator sends as normal traffic, none of them near the policy
+  boundary. Spot-checking seven ordinary questions that sit near it - including "How do I reset my
+  password?" - all seven were rejected. Treat a 0% golden rejection rate as "the dataset is easy",
+  not "the filter is precise", and when triaging a spike, sample the actual messages (§2) rather
+  than trusting the ratio.

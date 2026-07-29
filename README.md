@@ -103,6 +103,7 @@ The agent rejects requests based on content patterns:
 | `agent_rejections_total` | Counter | `prompt_version`, `reason` |
 | `agent_request_latency_seconds` | Histogram | `prompt_version`, `route` |
 | `agent_build_info` | Gauge | `prompt_version`, `git_sha` |
+| `agent_inflight_requests` | Gauge | `prompt_version` |
 
 `status` is one of `accepted`, `rejected`, `invalid_request`, `error`. Rejections are HTTP 200
 responses, so `status` is the only thing that separates policy behaviour from actual failures.
