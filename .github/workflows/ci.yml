@@ -155,7 +155,22 @@ jobs:
     permissions:
       contents: write
     steps:
+      # The first run on main failed here with GH006: this commit carries
+      # [skip ci], so it can never satisfy the branch ruleset's five required
+      # checks, and the gate correctly refused an unverified commit on the
+      # release branch. This repo is a personal account, not an organisation,
+      # and GitHub only allows a GitHub App/Integration to bypass a ruleset on
+      # org-owned repos - granting the built-in Actions identity a bypass here
+      # returns 422 ("must be part of the ruleset source or owner
+      # organization"). The ruleset instead grants an explicit bypass to the
+      # repo owner (User actor, bypass_mode: always), and this checkout
+      # authenticates as that user via a fine-grained PAT (DEPLOY_PAT, scoped
+      # to Contents: read/write on this repo only) instead of the default
+      # GITHUB_TOKEN, so only this one push can bypass - humans still can't
+      # push directly, and neither can any other workflow.
       - uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.DEPLOY_PAT }}
       # deployment/manifest.yml explicitly asks for this: image_tag updated
       # to the deployed commit SHA, with a history row appended.
       - name: Record the deployed commit in deployment/manifest.yml
